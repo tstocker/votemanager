@@ -1,0 +1,18 @@
+tasks:
+  generate-tests:
+    desc: "Génère les tests pour les fichiers du dernier commit"
+    cmds:
+      - node scripts/generate-tests.js
+    env:
+      GEMINI_API_KEY: "{{.GEMINI_API_KEY}}"
+      BRANCH_NAME:
+        sh: git branch --show-current
+
+  generate-tests:file:
+    desc: "Génère les tests pour un fichier précis. Usage: task generate-tests:file FILE=app/home.tsx"
+    cmds:
+      - node scripts/generate-tests.js --file={{.FILE}}
+    env:
+      GEMINI_API_KEY: "{{.GEMINI_API_KEY}}"
+      BRANCH_NAME:
+        sh: git branch --show-current
