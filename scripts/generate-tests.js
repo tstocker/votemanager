@@ -7,7 +7,7 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:32b";
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const BASE_BRANCH = execSync("git branch --show-current").toString().trim();
 const TIMESTAMP = Date.now();
-const TEST_BRANCH = `${BASE_BRANCH}/tests/${TIMESTAMP}`;
+const TEST_BRANCH = `${BASE_BRANCH}-llmTests-${TIMESTAMP}`;
 
 // Vérifie qu'Ollama tourne
 async function checkOllama() {
