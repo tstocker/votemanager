@@ -65,6 +65,8 @@ ${code}`,
   const data = await response.json();
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
 
+  console.log("Réponse brute Gemini :", text);
+
   try {
     return JSON.parse(text.replace(/```json|```/g, "").trim());
   } catch {

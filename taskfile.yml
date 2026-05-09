@@ -1,3 +1,7 @@
+version: '3'
+
+dotenv: ['.env']
+
 tasks:
   generate-tests:
     desc: "Génère les tests pour les fichiers du dernier commit"
@@ -14,5 +18,22 @@ tasks:
       - node scripts/generate-tests.js --file={{.FILE}}
     env:
       GEMINI_API_KEY: "{{.GEMINI_API_KEY}}"
+      BRANCH_NAME:
+        sh: git branch --show-current
+
+  generate-tests:all:
+    desc: "Génère les tests pour tous les fichiers source existants"
+    cmds:
+      - |
+        set -a && source .env && set +a
+        find app lib -name "*.ts" -o -name "*.tsx" | \
+        grep -v "\.test\." | \
+        grep -v "\.spec\." | \
+        grep -v "_layout" | \
+        while read file; do
+          echo "Génération pour : $file"
+          GEMINI_API_KEY=$GEMINI_API_KEY node scripts/generate-tests.js --file="$file"
+        done
+    env:
       BRANCH_NAME:
         sh: git branch --show-current
