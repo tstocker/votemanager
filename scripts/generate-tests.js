@@ -1,10 +1,25 @@
+require("dotenv").config();
 const { execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
-require("dotenv").config();
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:32b";
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const BASE_BRANCH = process.env.BRANCH_NAME || "main";
 const TEST_BRANCH = `tests/${BASE_BRANCH}-${Date.now()}`;
+
+// Vérifie qu'Ollama tourne
+async function checkOllama() {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`);
+    if (!res.ok) throw new Error();
+    console.log("✓ Ollama disponible — modèle :", OLLAMA_MODEL);
+    return true;
+  } catch {
+    console.log("⚠️  Ollama non disponible — lance : brew services start ollama");
+    return false;
+  }
+}
 
 function getChangedFiles() {
   const output = execSync("git diff HEAD~1 --name-only --diff-filter=AM")
@@ -12,81 +27,106 @@ function getChangedFiles() {
     .trim();
   return output
     .split("\n")
-    .filter((f) => f.match(/\.(ts|tsx|js|jsx)$/) && !f.includes(".test.") && !f.includes(".spec."));
+    .filter(
+      (f) =>
+        f.match(/\.(ts|tsx|js|jsx)$/) &&
+        !f.includes(".test.") &&
+        !f.includes(".spec.") &&
+        !f.includes("_layout")
+    );
 }
 
-async function generateTests(filePath) {
-  const code = fs.readFileSync(filePath, "utf-8");
-  const isScreen = filePath.includes("app/") || filePath.includes("screens/");
+async function generateUnitTests(filePath, code) {
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      options: { temperature: 0.2 }, // moins créatif = plus fiable
+      prompt: `You are a React Native testing expert. Write Jest unit tests for this file.
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: `Tu es un expert en tests React Native.
+Rules:
+- Use @testing-library/react-native
+- Add jest.mock('@react-native-async-storage/async-storage') if AsyncStorage is used
+- Add jest.mock('expo-router') if expo-router is used
+- Return ONLY the TypeScript test file content, no explanation, no markdown, no backticks
 
-Génère pour ce fichier :
-1. Tests unitaires Jest — teste la logique, les fonctions pures, les hooks, le rendu avec @testing-library/react-native
-2. ${isScreen ? "Tests e2e Playwright (@playwright/test) — teste les interactions utilisateur sur l'écran complet" : "null pour les e2e car ce n'est pas un écran"}
+File: ${filePath}
+Code:
+${code}
 
-Règles Jest :
-- Importe depuis @testing-library/react-native
-- Mock AsyncStorage : jest.mock('@react-native-async-storage/async-storage')
-- Mock expo-router : jest.mock('expo-router')
-
-Règles Playwright :
-- Utilise @playwright/test
-- Les selectors doivent utiliser getByRole, getByText, getByTestId
-- Inclus beforeEach pour la navigation vers l'écran
-
-Réponds UNIQUEMENT en JSON sans markdown :
-{
-  "unit": "contenu complet du fichier Jest .test.ts",
-  "e2e": "contenu complet du fichier Playwright .spec.ts ou null"
-}
-
-Fichier : ${filePath}
-Code :
-${code}`,
-              },
-            ],
-          },
-        ],
-      }),
-    }
-  );
+Return only the .test.ts file content:`,
+    }),
+  });
 
   const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+  return data.response?.trim() ?? null;
+}
 
-  console.log("Réponse brute Gemini :", text);
+async function generateE2ETests(filePath, code) {
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      stream: false,
+      options: { temperature: 0.2 },
+      prompt: `You are a Playwright testing expert for React Native Web. Write Playwright e2e tests for this screen.
 
-  try {
-    return JSON.parse(text.replace(/```json|```/g, "").trim());
-  } catch {
-    console.error("Parse error pour", filePath);
-    return null;
+Rules:
+- Use @playwright/test
+- Use getByRole, getByText, getByTestId selectors
+- Add beforeEach with navigation to the screen
+- Return ONLY the TypeScript spec file content, no explanation, no markdown, no backticks
+
+File: ${filePath}
+Code:
+${code}
+
+Return only the .spec.ts file content:`,
+    }),
+  });
+
+  const data = await response.json();
+  return data.response?.trim() ?? null;
+}
+
+function cleanResponse(text) {
+  // Retire les backticks markdown si Qwen en met quand même
+  return text
+    .replace(/^```(typescript|ts|javascript|js)?\n?/m, "")
+    .replace(/```$/m, "")
+    .trim();
+}
+
+function writeFile(filePath, content) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content, "utf-8");
+
+  if (fs.existsSync(filePath)) {
+    console.log("✓ Généré :", filePath);
+    return true;
+  } else {
+    console.error("✗ Échec écriture :", filePath);
+    return false;
   }
 }
 
-function commitAndPush(files) {
-  execSync(`git config user.name "Gemini Test Bot"`);
-  execSync(`git config user.email "bot@gemini.local"`);
+function commitTests(files) {
+  execSync(`git config user.name "Qwen Test Bot"`);
+  execSync(`git config user.email "bot@ollama.local"`);
   execSync(`git checkout -b ${TEST_BRANCH}`);
   execSync(`git add ${files.join(" ")}`);
-  execSync(`git commit -m "tests: generated by Gemini for ${BASE_BRANCH}"`);
-  execSync(`git push origin ${TEST_BRANCH}`);
-  console.log("✓ Branche créée :", TEST_BRANCH);
+  execSync(`git commit -m "tests: generated by Qwen for ${BASE_BRANCH}"`);
+  console.log("✓ Branche créée et committée :", TEST_BRANCH);
+  console.log("   Pour pusher : git push origin", TEST_BRANCH);
 }
 
 async function main() {
-  // Support fichier unique via --file
+  const ollamaOk = await checkOllama();
+  if (!ollamaOk) process.exit(0);
+
   const fileArg = process.argv.find((a) => a.startsWith("--file="));
   const changedFiles = fileArg
     ? [fileArg.replace("--file=", "")]
@@ -103,40 +143,45 @@ async function main() {
 
   for (const file of changedFiles) {
     if (!fs.existsSync(file)) {
-      console.warn("Fichier introuvable :", file);
+      console.warn("⚠️  Fichier introuvable :", file);
       continue;
     }
 
-    console.log("Génération pour :", file);
-    const tests = await generateTests(file);
-    if (!tests) continue;
-
+    const code = fs.readFileSync(file, "utf-8");
     const dir = path.dirname(file);
     const base = path.basename(file, path.extname(file));
+    const isScreen = file.includes("app/") || file.includes("screens/");
 
-    // Jest — __tests__/monFichier.test.ts
-    if (tests.unit) {
+    console.log(`\n→ Génération tests unitaires pour : ${file}`);
+    const unitContent = await generateUnitTests(file, code);
+    if (unitContent) {
       const testDir = path.join(dir, "__tests__");
-      fs.mkdirSync(testDir, { recursive: true });
-      const p = path.join(testDir, `${base}.test.ts`);
-      fs.writeFileSync(p, tests.unit, "utf-8");
-      generatedFiles.push(p);
-      console.log("✓ Jest :", p);
+      const testPath = path.join(testDir, `${base}.test.ts`);
+      writeFile(testPath, cleanResponse(unitContent));
+      generatedFiles.push(testPath);
     }
 
-    // Playwright — e2e/monFichier.spec.ts
-    if (tests.e2e && tests.e2e !== "null") {
-      const e2eDir = path.join("e2e", path.dirname(file));
-      fs.mkdirSync(e2eDir, { recursive: true });
-      const p = path.join(e2eDir, `${base}.spec.ts`);
-      fs.writeFileSync(p, tests.e2e, "utf-8");
-      generatedFiles.push(p);
-      console.log("✓ Playwright :", p);
+    if (isScreen) {
+      console.log(`→ Génération tests e2e pour : ${file}`);
+      const e2eContent = await generateE2ETests(file, code);
+      if (e2eContent) {
+        const e2eDir = path.join("e2e", dir);
+        const e2ePath = path.join(e2eDir, `${base}.spec.ts`);
+        writeFile(e2ePath, cleanResponse(e2eContent));
+        generatedFiles.push(e2ePath);
+      }
+    }
+
+    // Pause entre les fichiers pour ne pas surcharger
+    if (changedFiles.length > 1) {
+      await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
   if (generatedFiles.length > 0) {
-    commitAndPush(generatedFiles);
+    commitTests(generatedFiles);
+  } else {
+    console.log("Aucun test généré.");
   }
 }
 
