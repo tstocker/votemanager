@@ -9,6 +9,7 @@
     "url": "https://github.com/tstocker"
   },
   "scripts": {
+    "prepare": "bash scripts/install-hooks.sh",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",

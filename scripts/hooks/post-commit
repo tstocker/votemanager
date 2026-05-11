@@ -1,0 +1,17 @@
+#!/bin/bash
+
+set -a
+source .env
+set +a
+
+# Check if commit only includes tests files
+CHANGED=$(git diff HEAD~1 --name-only)
+NON_TEST_FILES=$(echo "$CHANGED" | grep -v "\.test\." | grep -v "\.spec\." | grep -v "__tests__" | grep -v "e2e/")
+
+if [ -z "$NON_TEST_FILES" ]; then
+  echo "Unit tests file commit only - no test generation in post commit."
+  exit 0
+fi
+
+echo "-][*_*][-  Generate tests with Qwen..."
+node scripts/generate-tests.js
