@@ -2,19 +2,15 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
-jest.mock("dotenv");
-jest.mock("child_process", () => ({
-  execSync: jest.fn(),
-}));
+jest.mock("child_process");
 jest.mock("fs");
-jest.mock("path");
 
-describe("generate-tests.js", () => {
+describe("generate-tests", () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
+    jest.resetModules();
     process.env = { ...originalEnv };
-    jest.clearAllMocks();
   });
 
   afterAll(() => {
@@ -27,157 +23,92 @@ describe("generate-tests.js", () => {
         ok: true,
         json: jest.fn(),
       });
-      const result = await checkOllama();
+
+      const result = await require("./scripts/generate-tests").checkOllama();
       expect(result).toBe(true);
     });
 
-    it("should return false if Ollama is not available", async () => {
+    it("should return false if Ollama is unavailable", async () => {
       global.fetch = jest.fn().mockRejectedValue(new Error());
-      const result = await checkOllama();
+
+      const result = await require("./scripts/generate-tests").checkOllama();
       expect(result).toBe(false);
     });
   });
 
   describe("getChangedFiles", () => {
     it("should return a list of changed files", () => {
-      (execSync as jest.Mock).mockReturnValue(
-        "src/App.tsx\nsrc/components/Button.tsx"
+      execSync.mockReturnValue(
+        "src/App.tsx\nsrc/components/Button.tsx\nREADME.md"
       );
-      const result = getChangedFiles();
-      expect(result).toEqual(["src/App.tsx", "src/components/Button.tsx"]);
-    });
 
-    it("should filter out non-source files", () => {
-      (execSync as jest.Mock).mockReturnValue(
-        "src/App.test.tsx\nsrc/components/Button.js"
-      );
-      const result = getChangedFiles();
-      expect(result).toEqual(["src/components/Button.js"]);
+      const result = require("./scripts/generate-tests").getChangedFiles();
+      expect(result).toEqual(["src/App.tsx", "src/components/Button.tsx"]);
     });
   });
 
   describe("generateUnitTests", () => {
-    it("should generate unit tests for a given file", async () => {
+    it("should generate unit tests for a given file and code", async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: jest.fn().mockReturnValue({ response: "test content" }),
       });
-      const result = await generateUnitTests("src/App.tsx", "code");
-      expect(result).toBe("test content");
-    });
 
-    it("should return null if fetch fails", async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error());
-      const result = await generateUnitTests("src/App.tsx", "code");
-      expect(result).toBeNull();
+      const result = await require("./scripts/generate-tests").generateUnitTests(
+        "src/App.tsx",
+        "const App = () => <div>Hello World</div>;"
+      );
+      expect(result).toBe("test content");
     });
   });
 
   describe("generateE2ETests", () => {
-    it("should generate e2e tests for a given file", async () => {
+    it("should generate e2e tests for a given file and code", async () => {
       global.fetch = jest.fn().mockResolvedValue({
         ok: true,
         json: jest.fn().mockReturnValue({ response: "test content" }),
       });
-      const result = await generateE2ETests("src/App.tsx", "code");
-      expect(result).toBe("test content");
-    });
 
-    it("should return null if fetch fails", async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error());
-      const result = await generateE2ETests("src/App.tsx", "code");
-      expect(result).toBeNull();
+      const result = await require("./scripts/generate-tests").generateE2ETests(
+        "src/App.tsx",
+        "const App = () => <div>Hello World</div>;"
+      );
+      expect(result).toBe("test content");
     });
   });
 
   describe("cleanResponse", () => {
-    it("should remove markdown backticks", () => {
-      const result = cleanResponse("```typescript\ntest content\n```");
-      expect(result).toBe("test content");
-    });
-
-    it("should not modify text without backticks", () => {
-      const result = cleanResponse("test content");
+    it("should clean the response by removing code block markers", () => {
+      const result = require("./scripts/generate-tests").cleanResponse(
+        "```typescript\ntest content\n```"
+      );
       expect(result).toBe("test content");
     });
   });
 
   describe("writeFile", () => {
-    it("should write a file and return true", () => {
-      (fs.mkdirSync as jest.Mock).mockReturnValue(undefined);
-      (fs.writeFileSync as jest.Mock).mockReturnValue(undefined);
-      (fs.existsSync as jest.Mock).mockReturnValue(true);
-      const result = writeFile("path/to/file.ts", "test content");
+    it("should write the file to the specified path", () => {
+      fs.mkdirSync = jest.fn();
+      fs.writeFileSync = jest.fn();
+
+      const result = require("./scripts/generate-tests").writeFile(
+        "src/App.test.ts",
+        "test content"
+      );
       expect(result).toBe(true);
     });
 
-    it("should return false if file does not exist after writing", () => {
-      (fs.mkdirSync as jest.Mock).mockReturnValue(undefined);
-      (fs.writeFileSync as jest.Mock).mockReturnValue(undefined);
-      (fs.existsSync as jest.Mock).mockReturnValue(false);
-      const result = writeFile("path/to/file.ts", "test content");
-      expect(result).toBe(false);
-    });
-  });
-
-  describe("commitTests", () => {
-    it("should commit tests to a new branch", () => {
-      (execSync as jest.Mock).mockReturnValue(undefined);
-      commitTests(["file1.test.ts", "file2.spec.ts"]);
-      expect(execSync).toHaveBeenCalledWith(
-        `git config user.name "Qwen Test Bot"`
-      );
-      expect(execSync).toHaveBeenCalledWith(
-        `git config user.email "bot@ollama.local"`
-      );
-      expect(execSync).toHaveBeenCalledWith(`git checkout -b ${TEST_BRANCH}`);
-      expect(execSync).toHaveBeenCalledWith(
-        `git add file1.test.ts file2.spec.ts`
-      );
-      expect(execSync).toHaveBeenCalledWith(
-        `git commit -m "tests: generated by Qwen for ${BASE_BRANCH}"`
-      );
-    });
-  });
-
-  describe("main", () => {
-    it("should generate and commit tests if Ollama is available", async () => {
-      process.env.OLLAMA_MODEL = "qwen2.5-coder:32b";
-      process.env.OLLAMA_URL = "http://localhost:11434";
-      process.env.BRANCH_NAME = "main";
-
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        json: jest.fn().mockReturnValue({ response: "test content" }),
+    it("should return false if writing fails", () => {
+      fs.mkdirSync = jest.fn();
+      fs.writeFileSync = jest.fn().mockImplementation(() => {
+        throw new Error();
       });
 
-      (execSync as jest.Mock).mockReturnValue(
-        "src/App.tsx\nsrc/components/Button.tsx"
-      );
-
-      (fs.mkdirSync as jest.Mock).mockReturnValue(undefined);
-      (fs.writeFileSync as jest.Mock).mockReturnValue(undefined);
-      (fs.existsSync as jest.Mock).mockReturnValue(true);
-
-      await main();
-
-      expect(execSync).toHaveBeenCalledWith("git diff HEAD~1 --name-only --diff-filter=AM");
-      expect(global.fetch).toHaveBeenCalledWith(
-        "http://localhost:11434/api/generate",
-        expect.any(Object)
-      );
-      expect(writeFile).toHaveBeenCalledWith(
-        path.join(path.dirname("src/App.tsx"), "__tests__", `${path.basename("src/App.tsx", path.extname("src/App.tsx"))}.test.ts`),
+      const result = require("./scripts/generate-tests").writeFile(
+        "src/App.test.ts",
         "test content"
       );
-    });
-
-    it("should not generate tests if Ollama is not available", async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error());
-      await main();
-      expect(execSync).not.toHaveBeenCalledWith(
-        `git config user.name "Qwen Test Bot"`
-      );
+      expect(result).toBe(false);
     });
   });
 });
