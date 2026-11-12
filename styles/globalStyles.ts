@@ -7,6 +7,7 @@ export const styles = StyleSheet.create({
   },
   container: {
     padding: 16,
+    flex: 1,
   },
   title: {
     fontSize: 28,
@@ -43,7 +44,7 @@ export const styles = StyleSheet.create({
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    marginBottom: 16,
+    marginBottom: 4,
     color: "#0f172a",
   },
   button: {
